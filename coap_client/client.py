@@ -34,8 +34,8 @@ async def main():
     site.add_resource(["sensor"], DataSensor())
     site.add_resource(["echo"], EchoResource())
     # MOD: escuchar en todas las interfaces (no solo loopback)
-    await Context.create_server_context(site, bind=("0.0.0.0", 5683))
-    logging.info("CoAP server escuchando en coap://0.0.0.0:5683; datafile=%s", DATAFILE)  # MOD: log con datafile
+    await Context.create_server_context(site, bind=("127.0.0.1", 5683))
+    logging.info("CoAP server escuchando en coap://127.0.0.1:5683; datafile=%s", DATAFILE)  # MOD: log con datafile
     await asyncio.get_running_loop().create_future()
 
 if __name__ == "__main__":

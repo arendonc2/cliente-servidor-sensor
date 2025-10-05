@@ -28,7 +28,7 @@ async def one_request(method, uri, data, timeout):
 
 async def main():
     p = argparse.ArgumentParser(description="Minimal CoAP client (GET/POST), Python 3.7+ compatible.")
-    p.add_argument("--host", default="127.0.0.1", help="Servidor (IP/DNS). Ej.: 127.0.0.1 o 34.xx.xx.xx")
+    p.add_argument("--host", default="0.0.0.0", help="Servidor (IP/DNS). Ej.: 127.0.0.1 o 34.xx.xx.xx")
     p.add_argument("--port", type=int, default=5683, help="Puerto (por defecto 5683)")
     p.add_argument("--scheme", default="coap", choices=["coap"], help="Esquema (solo coap en este ejemplo)")
     p.add_argument("--method", default="GET", choices=["GET", "POST"], help="Método")

@@ -48,6 +48,16 @@ enum { COAP_CON=0, COAP_NON=1, COAP_ACK=2, COAP_RST=3 };
 #define OPT_CONTENT_FORMAT  12
 #define CF_TEXT_PLAIN        0  /* text/plain;charset=utf-8 */
 
+/* Copia segura con truncado explícito y devuelve bytes copiados */
+static size_t safe_cp(char *dst, size_t dstsz, const char *src) {
+    if (dstsz == 0) return 0;
+    size_t n = strlen(src);
+    if (n > dstsz - 1) n = dstsz - 1;  // límite manual en vez de strnlen
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+    return n;
+}
+
 static volatile sig_atomic_t g_stop = 0;
 static void on_sig(int s){ (void)s; g_stop = 1; }
 
@@ -257,13 +267,16 @@ int main(void){
                     snprintf(resp, sizeof(resp), "WRITE_FAIL");
                     rlen = strlen(resp); rcode = COAP_500_INTERR;
                 }
-            } else if (req.code == COAP_GET){ /* devolver último */
-                char last[2048];
-                if (read_last_line(DATA, last, sizeof(last))){
-                    snprintf(resp, sizeof(resp), "%s", last);
+            else if (req.code == COAP_GET) {            // dentro de if (strcmp(req.uri_path, "sensor") == 0)
+                char last[2048] = {0};                  // <-- declara 'last' aquí
+                if (read_last_line(DATA, last, sizeof(last))) {
+                    rlen  = safe_cp(resp, sizeof(resp), last);   // en vez de snprintf(...)
+                    rcode = COAP_205_CONTENT;
                 } else {
-                    snprintf(resp, sizeof(resp), "NO_DATA");
+                    rlen  = safe_cp(resp, sizeof(resp), "NO_DATA");
+                    rcode = COAP_205_CONTENT;
                 }
+            }
                 rlen = strlen(resp); rcode = COAP_205_CONTENT;
             } else {
                 snprintf(resp, sizeof(resp), "NOT_FOUND"); /* método no soportado aquí */
@@ -286,5 +299,6 @@ int main(void){
     puts("bye");
     return 0;
 }
+
 
 

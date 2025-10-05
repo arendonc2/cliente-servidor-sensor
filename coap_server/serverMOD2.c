@@ -1,22 +1,13 @@
-// coap_min_server.c — Servidor CoAP mínimo (C + sockets UDP, sin librerías CoAP)
-// Requisitos:
-//   - POST /sensor  -> apendea el payload a un .txt
-//   - GET  /sensor  -> responde la última línea de ese .txt
+// coap_min_server.c — Servidor CoAP mínimo (UDP puro, sin librerías CoAP)
+// Endpoints:
+//   POST /sensor -> apendea el payload a un .txt
+//   GET  /sensor -> devuelve la última línea del .txt
 //
 // Compilar:  gcc -std=c99 -O2 -Wall -Wextra -o coap_min_server coap_min_server.c
 // Ejecutar:  ./coap_min_server
-//
-// Ruta de archivo (opcional via env):
-//   COAP_DATAFILE  (por defecto: "/opt/coap/data.txt")
-//
-// Nota: Implementación mínima de CoAP v1:
-//   - Lee header (ver/type/tkl/code/mid) + token + Uri-Path
-//   - Responde ACK si request fue CON, sino NON
-//   - Copia token, incluye Content-Format: text/plain (opt 12, valor 0)
-//   - No maneja Observe/Block/retransmisiones, etc.
+// Archivo (opcional por env):  COAP_DATAFILE  (default: "/opt/coap/data.txt")
 
 #include <arpa/inet.h>
-#include <errno.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdint.h>
@@ -29,51 +20,44 @@
 #define COAP_PORT 5683
 #define BUF_SZ    1500
 
-/* ---- CoAP básicos ---- */
+/* --- CoAP básicos --- */
 #define COAP_VER 1
 enum { COAP_CON=0, COAP_NON=1, COAP_ACK=2, COAP_RST=3 };
-
 #define COAP_GET   0x01
 #define COAP_POST  0x02
-
-/* Respuestas class.detail */
 #define COAP_MK(cls,det)   (uint8_t)(((cls)<<5)|(det))
 #define COAP_204_CHANGED   COAP_MK(2,4)
 #define COAP_205_CONTENT   COAP_MK(2,5)
 #define COAP_404_NOTFOUND  COAP_MK(4,4)
 #define COAP_500_INTERR    COAP_MK(5,0)
-
-/* Opciones */
 #define OPT_URI_PATH        11
 #define OPT_CONTENT_FORMAT  12
-#define CF_TEXT_PLAIN        0  /* text/plain;charset=utf-8 */
-
-/* Copia segura con truncado explícito y devuelve bytes copiados */
-static size_t safe_cp(char *dst, size_t dstsz, const char *src) {
-    if (dstsz == 0) return 0;
-    size_t n = strlen(src);
-    if (n > dstsz - 1) n = dstsz - 1;  // límite manual en vez de strnlen
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-    return n;
-}
+#define CF_TEXT_PLAIN        0
 
 static volatile sig_atomic_t g_stop = 0;
 static void on_sig(int s){ (void)s; g_stop = 1; }
 
-/* ---- Ruta del archivo ---- */
 static const char* datafile_path(void){
     const char* p = getenv("COAP_DATAFILE");
     return (p && *p) ? p : "/opt/coap/data.txt";
 }
 
-/* ---- Util: quitar \r\n ---- */
+/* --- utilidades de texto/archivo --- */
 static void rstrip(char* s){
     size_t n = strlen(s);
     while (n && (s[n-1]=='\n' || s[n-1]=='\r')) s[--n] = '\0';
 }
 
-/* ---- Apéndice simple ---- */
+/* Copia segura con truncado explícito y devuelve bytes copiados */
+static size_t safe_cp(char *dst, size_t dstsz, const char *src) {
+    if (dstsz == 0) return 0;
+    size_t n = strlen(src);
+    if (n > dstsz - 1) n = dstsz - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+    return n;
+}
+
 static int append_line(const char* path, const char* line){
     FILE* f = fopen(path, "a");
     if (!f) return -1;
@@ -83,7 +67,6 @@ static int append_line(const char* path, const char* line){
     return 0;
 }
 
-/* ---- Leer última línea NO vacía ---- */
 static int read_last_line(const char* path, char* out, size_t outsz){
     FILE* f = fopen(path, "r");
     if (!f) return 0;
@@ -91,16 +74,16 @@ static int read_last_line(const char* path, char* out, size_t outsz){
     while (fgets(line, sizeof(line), f)){
         rstrip(line);
         if (line[0]){
-            snprintf(last, sizeof(last), "%s", line);
+            safe_cp(last, sizeof(last), line);
         }
     }
     fclose(f);
     if (!last[0]) return 0;
-    snprintf(out, outsz, "%s", last);
+    safe_cp(out, outsz, last);
     return 1;
 }
 
-/* ---- CoAP: parseo mínimo ---- */
+/* --- CoAP parsing/build --- */
 typedef struct {
     uint8_t type, tkl, code;
     uint16_t mid;
@@ -115,7 +98,6 @@ static int read_ext(uint8_t v, const uint8_t** p, const uint8_t* end){
     if (v == 14){ if (*p+1 >= end) return -1; int val = (((*p)[0]<<8)|(*p)[1]); *p+=2; return 269 + val; }
     return -1;
 }
-
 static void append_uri_seg(char* dst, size_t dstsz, const char* seg, size_t seglen){
     size_t cur = strlen(dst);
     if (seglen == 0 || dstsz == 0) return;
@@ -125,7 +107,6 @@ static void append_uri_seg(char* dst, size_t dstsz, const char* seg, size_t segl
     memcpy(dst + cur, seg, copy);
     dst[cur + copy] = '\0';
 }
-
 static int coap_parse(const uint8_t* buf, size_t len, coap_req_t* r){
     if (len < 4u) return -1;
     uint8_t ver = (buf[0]>>6) & 0x03;
@@ -136,11 +117,9 @@ static int coap_parse(const uint8_t* buf, size_t len, coap_req_t* r){
     r->mid  = (uint16_t)((buf[2]<<8) | buf[3]);
     if ((size_t)4 + (size_t)r->tkl > len || r->tkl > 8) return -1;
     memcpy(r->token, buf+4, r->tkl);
-
     const uint8_t* p = buf + 4 + r->tkl;
     const uint8_t* end = buf + len;
     r->uri_path[0] = '\0';
-
     int last = 0;
     while (p < end && *p != 0xFF){
         uint8_t b = *p++;
@@ -154,7 +133,6 @@ static int coap_parse(const uint8_t* buf, size_t len, coap_req_t* r){
         }
         p += l; last = num;
     }
-
     if (p < end && *p == 0xFF){
         p++;
         r->payload = p;
@@ -163,29 +141,23 @@ static int coap_parse(const uint8_t* buf, size_t len, coap_req_t* r){
     return 0;
 }
 
-/* ---- CoAP: build de respuesta ---- */
 static int add_option(uint8_t* out, size_t cap, int* last, int number, const uint8_t* val, size_t vlen){
     if (cap < 1u) return -1;
     int delta = number - *last;
     uint8_t dl, ll, dext[2], lext[2]; size_t dextn=0, lextn=0;
-
     if (delta < 13){ dl=(uint8_t)delta; }
     else if (delta < 269){ dl=13; dext[dextn++]=(uint8_t)(delta-13); }
     else { dl=14; int D=delta-269; dext[dextn++]=(uint8_t)((D>>8)&0xFF); dext[dextn++]=(uint8_t)(D&0xFF); }
-
     if (vlen < 13u){ ll=(uint8_t)vlen; }
     else if (vlen < 269u){ ll=13; lext[lextn++]=(uint8_t)(vlen-13u); }
     else { ll=14; size_t K=vlen-269u; lext[lextn++]=(uint8_t)((K>>8)&0xFF); lext[lextn++]=(uint8_t)(K&0xFF); }
-
     size_t need = 1u + dextn + lextn + vlen;
     if (cap < need) return -1;
-
     uint8_t* q = out;
     *q++ = (uint8_t)((dl<<4)|ll);
     for (size_t i=0;i<dextn;i++) *q++ = dext[i];
     for (size_t i=0;i<lextn;i++) *q++ = lext[i];
     if (vlen && val){ memcpy(q, val, vlen); q += vlen; }
-
     *last = number;
     return (int)need;
 }
@@ -196,7 +168,6 @@ static size_t build_resp(uint8_t* out, size_t cap,
                          const uint8_t* payload, size_t plen){
     if (cap < 4u + (size_t)tkl) return 0;
     uint8_t type = (req_type == COAP_CON) ? COAP_ACK : COAP_NON;
-
     out[0] = (uint8_t)((COAP_VER<<6) | (type<<4) | (tkl & 0x0F));
     out[1] = code;
     out[2] = (uint8_t)(mid>>8);
@@ -204,7 +175,6 @@ static size_t build_resp(uint8_t* out, size_t cap,
     memcpy(out+4, tok, tkl);
     size_t pos = 4u + (size_t)tkl;
 
-    /* Content-Format: text/plain (opt=12, val=0) */
     int last = 0;
     uint8_t cf = CF_TEXT_PLAIN;
     int n = add_option(out+pos, cap-pos, &last, OPT_CONTENT_FORMAT, &cf, 1u);
@@ -220,7 +190,7 @@ static size_t build_resp(uint8_t* out, size_t cap,
     return pos;
 }
 
-/* ---- main ---- */
+/* --- main --- */
 int main(void){
     signal(SIGINT, on_sig);
     signal(SIGTERM, on_sig);
@@ -232,7 +202,6 @@ int main(void){
 
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0){ perror("socket"); return 1; }
-
     struct sockaddr_in a; memset(&a,0,sizeof(a));
     a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_ANY); a.sin_port = htons(COAP_PORT);
     if (bind(fd, (struct sockaddr*)&a, sizeof(a)) != 0){ perror("bind"); close(fd); return 1; }
@@ -261,30 +230,27 @@ int main(void){
         if (strcmp(req.uri_path, "sensor") == 0){
             if (req.code == COAP_POST){ /* guardar */
                 if (append_line(DATA, body) == 0){
-                    snprintf(resp, sizeof(resp), "%s", last);
-                    rlen = strlen(resp);
+                    rlen  = safe_cp(resp, sizeof(resp), "UPDATED");
+                    rcode = COAP_204_CHANGED;
                 } else {
-                    snprintf(resp, sizeof(resp), "WRITE_FAIL");
-                    rlen = strlen(resp); rcode = COAP_500_INTERR;
+                    rlen  = safe_cp(resp, sizeof(resp), "WRITE_FAIL");
+                    rcode = COAP_500_INTERR;
                 }
-            else if (req.code == COAP_GET) {            // dentro de if (strcmp(req.uri_path, "sensor") == 0)
-                char last[2048] = {0};                  // <-- declara 'last' aquí
-                if (read_last_line(DATA, last, sizeof(last))) {
-                    rlen  = safe_cp(resp, sizeof(resp), last);   // en vez de snprintf(...)
-                    rcode = COAP_205_CONTENT;
+            } else if (req.code == COAP_GET){ /* devolver último */
+                char last[2048] = {0};
+                if (read_last_line(DATA, last, sizeof(last))){
+                    rlen  = safe_cp(resp, sizeof(resp), last);
                 } else {
                     rlen  = safe_cp(resp, sizeof(resp), "NO_DATA");
-                    rcode = COAP_205_CONTENT;
                 }
-            }
-                rlen = strlen(resp); rcode = COAP_205_CONTENT;
+                rcode = COAP_205_CONTENT;
             } else {
-                snprintf(resp, sizeof(resp), "NOT_FOUND"); /* método no soportado aquí */
-                rlen = strlen(resp); rcode = COAP_404_NOTFOUND;
+                rlen  = safe_cp(resp, sizeof(resp), "NOT_FOUND");
+                rcode = COAP_404_NOTFOUND;
             }
         } else {
-            snprintf(resp, sizeof(resp), "NOT_FOUND");
-            rlen = strlen(resp); rcode = COAP_404_NOTFOUND;
+            rlen  = safe_cp(resp, sizeof(resp), "NOT_FOUND");
+            rcode = COAP_404_NOTFOUND;
         }
 
         size_t outlen = build_resp(outbuf, sizeof(outbuf),
@@ -299,6 +265,4 @@ int main(void){
     puts("bye");
     return 0;
 }
-
-
 

@@ -79,7 +79,7 @@ static int coap_parse(const uint8_t *buf, size_t len, coap_req_t *r) {
   r->tkl  =  buf[0]       & 0x0F;
   r->code =  buf[1];
   r->mid  = (uint16_t)buf[2] << 8 | buf[3];
-  if (4 + r->tkl > len || r->tkl > 8) return -1;
+  if ((size_t)4 + (size_t)r->tkl > len || r->tkl > 8u) return -1;
   memcpy(r->token, buf + 4, r->tkl);
 
   const uint8_t *p = buf + 4 + r->tkl;
@@ -158,7 +158,7 @@ static size_t build_response(uint8_t *out, size_t cap,
                              uint8_t req_type, uint8_t tkl, const uint8_t *tok,
                              uint16_t mid, uint8_t code,
                              const uint8_t *payload, size_t plen) {
-  if (cap < 4 + tkl) return 0;
+  if (cap < (size_t)4 + (size_t)tkl) return 0;
   uint8_t type = (req_type == COAP_CON) ? COAP_ACK : COAP_NON;
   out[0] = (uint8_t)((COAP_VER << 6) | (type << 4) | (tkl & 0x0F));
   out[1] = code;
@@ -274,3 +274,4 @@ int main(void) {
   puts("bye");
   return 0;
 }
+

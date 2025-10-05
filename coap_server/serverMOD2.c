@@ -51,6 +51,15 @@ enum { COAP_CON=0, COAP_NON=1, COAP_ACK=2, COAP_RST=3 };
 static volatile sig_atomic_t g_stop = 0;
 static void on_sig(int s){ (void)s; g_stop = 1; }
 
+/* Copia segura con truncado explícito y devuelve bytes copiados */
+static size_t safe_cp(char *dst, size_t dstsz, const char *src) {
+    if (dstsz == 0) return 0;
+    size_t n = strnlen(src, dstsz - 1);
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+    return n;
+}
+
 /* ---- Ruta del archivo ---- */
 static const char* datafile_path(void){
     const char* p = getenv("COAP_DATAFILE");
@@ -251,8 +260,7 @@ int main(void){
         if (strcmp(req.uri_path, "sensor") == 0){
             if (req.code == COAP_POST){ /* guardar */
                 if (append_line(DATA, body) == 0){
-                    snprintf(resp, sizeof(resp), "UPDATED");
-                    rlen = strlen(resp); rcode = COAP_204_CHANGED;
+                    rlen = safe_cp(resp, sizeof(resp), last);
                 } else {
                     snprintf(resp, sizeof(resp), "WRITE_FAIL");
                     rlen = strlen(resp); rcode = COAP_500_INTERR;
@@ -286,3 +294,4 @@ int main(void){
     puts("bye");
     return 0;
 }
+

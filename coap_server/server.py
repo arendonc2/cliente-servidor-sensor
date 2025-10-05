@@ -8,8 +8,8 @@ if sys.platform.startswith("win"):
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-DATAFILE    = os.environ.get("COAP_DATAFILE", "/opt/coap/data.txt")          # historial (append)
-CURRENTFILE = os.environ.get("COAP_CURRENTFILE", "/opt/coap/current.txt")    # estado actual (overwrite)
+DATAFILE    = os.environ.get("COAP_DATAFILE", "data.txt")          # historial (append)
+CURRENTFILE = os.environ.get("COAP_CURRENTFILE", "current.txt")    # estado actual (overwrite)
 
 def ensure_parent(path):
     d = os.path.dirname(path) or "."
